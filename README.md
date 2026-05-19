@@ -78,7 +78,7 @@ Gợi ý: `pm2 logs healthcheck-api` để xem trực tiếp trên terminal; `pm
 ## Chạy watcher (máy **ngoài** server)
 
 ```text
-python -m watcher.poller --config watcher/config.example.yaml
+python -m watcher.poller --config watcher/config.yaml
 ```
 
 Hoặc chỉ dùng biến môi trường:
@@ -88,6 +88,8 @@ Hoặc chỉ dùng biến môi trường:
 - `TIMEOUT_SEC` — timeout HTTP (mặc định 10)
 - `LOG_PATH` — file log (mặc định `watcher.log`)
 - `HEALTHCHECK_BEARER` — bearer khớp với `HEALTHCHECK_TOKEN` trên server (nếu có)
+
+Cấu hình thực tế: [`watcher/config.yaml`](watcher/config.yaml) (PM2 và lệnh trên đều trỏ file này). Mẫu tham khảo: `watcher/config.example.yaml` — lần đầu clone có thể `copy watcher\config.example.yaml watcher\config.yaml` rồi sửa `health_url`, token. File `config.yaml` không commit nếu có secret (`bearer_token`).
 
 File YAML có thể dùng khóa `bearer_token`; biến môi trường vẫn được ưu tiên khi cần override nhanh.
 

@@ -7,6 +7,7 @@ __pycache__/
 *.log
 logs/
 .env
+watcher/config.yaml
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/

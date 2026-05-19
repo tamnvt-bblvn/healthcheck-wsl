@@ -34,7 +34,7 @@ module.exports = {
       name: "healthcheck-watcher",
       cwd: root,
       script: python,
-      args: ["-m", "watcher.poller", "--config", "watcher/config.example.yaml"],
+      args: ["-m", "watcher.poller", "--config", "watcher/config.yaml"],
       env: {
         NODE_ENV: "production",
       },

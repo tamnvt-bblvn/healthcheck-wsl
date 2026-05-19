@@ -147,7 +147,7 @@ def main(argv: list[str] | None = None) -> int:
         "--config",
         type=Path,
         default=None,
-        help="YAML config (see watcher/config.example.yaml); env still overrides.",
+        help="YAML config (see watcher/config.yaml); env still overrides.",
     )
     args = p.parse_args(argv)
     try:
