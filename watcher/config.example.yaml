@@ -2,5 +2,8 @@ health_url: http://127.0.0.1:8010/health
 interval_sec: 30
 timeout_sec: 10
 log_path: watcher.log
+# Append full health JSON each OK ping (audit before outage)
+snapshot_path: snapshots.jsonl
+log_snapshot: true
 # Optional: Authorization: Bearer <token> if server enforces HEALTHCHECK_TOKEN
 # bearer_token: your-secret

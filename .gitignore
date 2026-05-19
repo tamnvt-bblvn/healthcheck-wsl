@@ -5,6 +5,7 @@ __pycache__/
 *$py.class
 .Python
 *.log
+snapshots.jsonl
 logs/
 .env
 watcher/config.yaml

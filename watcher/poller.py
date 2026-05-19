@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import sys
@@ -29,7 +30,7 @@ def _configure_logging(log_path: Path | None) -> None:
     root.handlers.clear()
     root.setLevel(logging.INFO)
 
-    sh = logging.StreamHandler(sys.stderr)
+    sh = logging.StreamHandler(sys.stdout)
     sh.setFormatter(fmt)
     root.addHandler(sh)
 
@@ -61,10 +62,21 @@ def _resolve_settings(config_path: Path | None) -> dict[str, Any]:
         "timeout_sec": _env_int("TIMEOUT_SEC", 10),
         "log_path": os.environ.get("LOG_PATH", "watcher.log"),
         "bearer_token": os.environ.get("HEALTHCHECK_BEARER", "") or None,
+        "snapshot_path": os.environ.get("SNAPSHOT_PATH", "snapshots.jsonl"),
+        "log_snapshot": os.environ.get("LOG_SNAPSHOT", "1").strip().lower()
+        not in ("0", "false", "no", "off"),
     }
     if config_path and config_path.is_file():
         file_cfg = _load_config(config_path)
-        for key in ("health_url", "interval_sec", "timeout_sec", "log_path", "bearer_token"):
+        for key in (
+            "health_url",
+            "interval_sec",
+            "timeout_sec",
+            "log_path",
+            "bearer_token",
+            "snapshot_path",
+            "log_snapshot",
+        ):
             if key in file_cfg and file_cfg[key] is not None:
                 base[key] = file_cfg[key]
     # Env wins for ops override
@@ -78,7 +90,37 @@ def _resolve_settings(config_path: Path | None) -> dict[str, Any]:
         base["log_path"] = os.environ["LOG_PATH"]
     if os.environ.get("HEALTHCHECK_BEARER"):
         base["bearer_token"] = os.environ["HEALTHCHECK_BEARER"]
+    if os.environ.get("SNAPSHOT_PATH"):
+        base["snapshot_path"] = os.environ["SNAPSHOT_PATH"]
+    if os.environ.get("LOG_SNAPSHOT"):
+        base["log_snapshot"] = os.environ["LOG_SNAPSHOT"].strip().lower() not in (
+            "0",
+            "false",
+            "no",
+            "off",
+        )
     return base
+
+
+def _snapshot_summary(payload: dict[str, Any]) -> str:
+    m = payload.get("metrics")
+    if not isinstance(m, dict):
+        return json.dumps(payload, ensure_ascii=False)[:500]
+    disks = m.get("disks") or []
+    disk_hint = ""
+    if disks and isinstance(disks[0], dict):
+        disk_hint = f" disk0={disks[0].get('mount')} used={disks[0].get('percent_used')}%"
+    mem = m.get("memory") if isinstance(m.get("memory"), dict) else {}
+    return (
+        f"cpu={m.get('cpu_percent')}% mem={mem.get('percent')}% "
+        f"uptime_sec={m.get('uptime_sec')}{disk_hint}"
+    )
+
+
+def _append_snapshot(path: Path, record: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
 def _headers(bearer_token: str | None) -> dict[str, str]:
@@ -95,10 +137,16 @@ def run_loop(settings: dict[str, Any]) -> int:
     log_path = Path(log_path_raw) if log_path_raw else None
 
     _configure_logging(log_path)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     log = logging.getLogger("watcher")
 
     healthy = True
     last_ok_at: str | None = None
+    last_snapshot: dict[str, Any] | None = None
+
+    snapshot_raw = settings.get("snapshot_path")
+    snapshot_path = Path(snapshot_raw) if snapshot_raw else None
+    log_snapshot = bool(settings.get("log_snapshot", True))
 
     log.info("watcher_start url=%s interval_sec=%s timeout_sec=%s", url, interval, timeout)
 
@@ -106,13 +154,19 @@ def run_loop(settings: dict[str, Any]) -> int:
 
     while True:
         err: str | None = None
+        payload: dict[str, Any] | None = None
         try:
             with httpx.Client(timeout=timeout, follow_redirects=True) as client:
                 r = client.get(url, headers=headers)
-            if r.status_code >= 500:
+            if r.status_code >= 400:
                 err = f"http_{r.status_code}"
-            elif r.status_code >= 400:
-                err = f"http_{r.status_code}"
+            else:
+                try:
+                    body = r.json()
+                    if isinstance(body, dict):
+                        payload = body
+                except json.JSONDecodeError:
+                    payload = {"raw": r.text[:2000]}
         except httpx.TimeoutException:
             err = "timeout"
         except httpx.RequestError as e:
@@ -121,18 +175,31 @@ def run_loop(settings: dict[str, Any]) -> int:
         now = _utc_iso_z()
 
         if err is None:
-            log.info("last_ok at=%s", now)
+            last_snapshot = payload
+            if log_snapshot and payload is not None:
+                log.info("last_ok at=%s %s", now, _snapshot_summary(payload))
+            else:
+                log.info("last_ok at=%s", now)
+            if snapshot_path is not None:
+                _append_snapshot(
+                    snapshot_path,
+                    {"watcher_at": now, "health": payload},
+                )
             if not healthy:
                 log.warning("recovered at=%s (was_down_since previous first_fail)", now)
             healthy = True
             last_ok_at = now
         else:
             if healthy:
+                snap_msg = "no_prior_snapshot"
+                if last_snapshot is not None:
+                    snap_msg = _snapshot_summary(last_snapshot)
                 log.warning(
-                    "first_fail at=%s err=%s last_ok_at=%s",
+                    "first_fail at=%s err=%s last_ok_at=%s last_snapshot=%s",
                     now,
                     err,
                     last_ok_at or "no_prior_ok",
+                    snap_msg,
                 )
                 healthy = False
             else:

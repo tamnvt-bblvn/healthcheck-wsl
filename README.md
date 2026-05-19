@@ -34,6 +34,27 @@ Biến môi trường:
 - `HOST` (mặc định `0.0.0.0`) — chỉ dùng khi chạy `python -m server.app`
 - `PORT` (mặc định `8000`)
 - `HEALTHCHECK_TOKEN` (tùy chọn) — nếu đặt, client phải gửi `Authorization: Bearer <token>`
+- `HEALTH_METRICS` (mặc định bật) — đặt `0` để tắt block `metrics` trong JSON
+
+### Metrics trong `/health`
+
+Mỗi lần gọi `/health`, server trả thêm `metrics` (qua `psutil`): CPU %, RAM, ổ đĩa, uptime, số process, load average (Linux). Ví dụ:
+
+```json
+{
+  "status": "ok",
+  "time": "2026-05-19T04:00:00Z",
+  "hostname": "SERVER-01",
+  "metrics": {
+    "cpu_percent": 12.4,
+    "memory": { "percent": 78.2, "used_gb": 6.1, "total_gb": 16.0 },
+    "disks": [{ "mount": "C:\\", "percent_used": 45.0, "free_gb": 120.5 }],
+    "uptime_sec": 86400
+  }
+}
+```
+
+Đây là **ảnh chụp lúc còn sống** — khi máy tắt đột ngột, watcher giữ bản ghi ping OK cuối.
 
 Triển khai lâu dài: Windows Service, NSSM, hoặc Task Scheduler để process luôn chạy cùng OS; nên đặt sau reverse proxy nội bộ (nginx, IIS) nếu có.
 
@@ -75,6 +96,8 @@ Có **hai loại** log, không trùng nhau:
 
 Gợi ý: `pm2 logs healthcheck-api` để xem trực tiếp trên terminal; `pm2 monit` để theo dõi CPU/RAM.
 
+Log (`watcher.log`, `snapshots.jsonl`, `logs/pm2-*.log`) **không** tự xoay — khi file quá lớn bạn tự xóa hoặc truncate.
+
 ## Chạy watcher (máy **ngoài** server)
 
 ```text
@@ -88,6 +111,10 @@ Hoặc chỉ dùng biến môi trường:
 - `TIMEOUT_SEC` — timeout HTTP (mặc định 10)
 - `LOG_PATH` — file log (mặc định `watcher.log`)
 - `HEALTHCHECK_BEARER` — bearer khớp với `HEALTHCHECK_TOKEN` trên server (nếu có)
+- `SNAPSHOT_PATH` — file JSONL lưu full response mỗi lần OK (mặc định `snapshots.jsonl`; để trống trong YAML để tắt)
+- `LOG_SNAPSHOT` — `0` để không in tóm tắt metrics vào `watcher.log`
+
+Khi **down**, log `first_fail` kèm `last_snapshot=...` (CPU/RAM/disk/uptime lần OK cuối). File **`snapshots.jsonl`**: mỗi dòng một JSON `{"watcher_at":"...","health":{...}}` — mở dòng cuối sau sự cố để xem trạng thái máy trước khi mất tín hiệu.
 
 Cấu hình thực tế: [`watcher/config.yaml`](watcher/config.yaml) (PM2 và lệnh trên đều trỏ file này). Mẫu tham khảo: `watcher/config.example.yaml` — lần đầu clone có thể `copy watcher\config.example.yaml watcher\config.yaml` rồi sửa `health_url`, token. File `config.yaml` không commit nếu có secret (`bearer_token`).
 
